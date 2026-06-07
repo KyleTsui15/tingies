@@ -1,44 +1,28 @@
-#!/usr/bin/env python3
 
 import cv2
 import numpy as np
 
-from tensorflow.lite.python.interpreter import Interpreter
+from ultralytics import YOLO
 
 import rclpy
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, QoSReliabilityPolicy, QoSHistoryPolicy
 
 from sensor_msgs.msg import Image
-from std_msgs.msg import Int32MultiArray
+from std_msgs.msg import Float32
 from cv_bridge import CvBridge
 
 
-class TFLiteDetectorNode(Node):
+class YOLOv8SegAngleNode(Node):
     def __init__(self):
-        super().__init__("tflite_detector_node")
+        super().__init__("yolov8_seg_angle_node")
 
         self.bridge = CvBridge()
 
-        self.model_path = "/home/hiwonder/ros_ws/src/ssd_mobilenet_live/models/model.tflite"
-        self.label_path = "/home/hiwonder/ros_ws/src/ssd_mobilenet_live/models/labelmap.txt"
+        self.model_path = "/home/hiwonder/ros_ws/src/yolov8_seg_live/models/best.pt"
+        self.model = YOLO(self.model_path)
+
         self.min_conf = 0.5
-
-        with open(self.label_path, "r") as f:
-            self.labels = [line.strip() for line in f.readlines()]
-
-        self.interpreter = Interpreter(model_path=self.model_path)
-        self.interpreter.allocate_tensors()
-
-        self.input_details = self.interpreter.get_input_details()
-        self.output_details = self.interpreter.get_output_details()
-
-        self.model_height = self.input_details[0]["shape"][1]
-        self.model_width = self.input_details[0]["shape"][2]
-        self.float_input = self.input_details[0]["dtype"] == np.float32
-
-        self.input_mean = 127.5
-        self.input_std = 127.5
 
         sensor_qos = QoSProfile(
             reliability=QoSReliabilityPolicy.BEST_EFFORT,
@@ -53,75 +37,64 @@ class TFLiteDetectorNode(Node):
             sensor_qos,
         )
 
-        self.box_pub = self.create_publisher(
-            Int32MultiArray,
-            "/ssd_mobilenet/box_corners",
+        self.angle_pub = self.create_publisher(
+            Float32,
+            "/yolov8_seg/object_angle",
             10,
         )
 
-        #NOTE Add subcription to master node for class retrieval 
-
-        self.get_logger().info("TFLite detector node started.")
+        self.get_logger().info("YOLOv8-seg angle node started.")
 
     def image_callback(self, msg):
-        # ROS Image -> OpenCV RGB image
-        image_rgb = self.bridge.imgmsg_to_cv2(msg, desired_encoding="rgb8")
+        image_bgr = self.bridge.imgmsg_to_cv2(msg, desired_encoding="bgr8")
 
-        imH, imW, _ = image_rgb.shape
+        results = self.model.predict(
+            source=image_bgr,
+            conf=self.min_conf,
+            verbose=False,
+            retina_masks=True,
+        )
 
-        # Resize to model input size
-        image_resized = cv2.resize(image_rgb, (self.model_width, self.model_height))
-        input_data = np.expand_dims(image_resized, axis=0)
+        result = results[0]
 
-        # Normalize only if the model expects float32
-        if self.float_input:
-            input_data = (np.float32(input_data) - self.input_mean) / self.input_std
-
-        # Run TFLite inference
-        self.interpreter.set_tensor(self.input_details[0]["index"], input_data)
-        self.interpreter.invoke()
-
-        # These indices match your original program
-        scores = self.interpreter.get_tensor(self.output_details[0]["index"])[0]
-        boxes = self.interpreter.get_tensor(self.output_details[1]["index"])[0]
-        classes = self.interpreter.get_tensor(self.output_details[3]["index"])[0]
-
-        best_box = None
-        best_score = 0.0
-        best_class = None
-
-        for i in range(len(scores)):
-            score = scores[i]
-
-            if score > self.min_conf and score <= 1.0:
-                if score > best_score:
-                    best_score = score
-                    best_box = boxes[i]
-                    best_class = int(classes[i])
-
-        if best_box is None:
+        if result.boxes is None or len(result.boxes) == 0:
             return
 
-        ymin = int(max(1, best_box[0] * imH))
-        xmin = int(max(1, best_box[1] * imW))
-        ymax = int(min(imH, best_box[2] * imH))
-        xmax = int(min(imW, best_box[3] * imW))
+        if result.masks is None or result.masks.xy is None:
+            return
 
-        box_corners = [
-            xmin, ymin,   # top-left
-            xmax, ymin,   # top-right
-            xmax, ymax,   # bottom-right
-            xmin, ymax,   # bottom-left
-        ]
+        scores = result.boxes.conf.cpu().numpy()
+        classes = result.boxes.cls.cpu().numpy().astype(int)
 
-        msg_out = Int32MultiArray()
-        msg_out.data = box_corners
-        self.box_pub.publish(msg_out)
+        best_index = int(np.argmax(scores))
 
-        label = self.labels[best_class] if best_class < len(self.labels) else str(best_class)
+        polygon = result.masks.xy[best_index]
+
+        if polygon is None or len(polygon) < 4:
+            return
+
+        contour = polygon.astype(np.float32)
+
+        rect = cv2.minAreaRect(contour)
+        (cx, cy), (w, h), angle = rect
+
+        if w < h:
+            angle += 90.0
+
+        if angle > 90:
+            angle -= 180
+        elif angle < -90:
+            angle += 180
+
+        angle_msg = Float32()
+        angle_msg.data = float(angle)
+        self.angle_pub.publish(angle_msg)
+
+        cls = int(classes[best_index])
+        class_name = self.model.names.get(cls, str(cls))
 
         self.get_logger().info(
-            f"Published {label} {best_score:.2f}: {box_corners}"
+            f"{class_name}: angle={angle:.2f} deg, center=({cx:.1f}, {cy:.1f})"
         )
 
 
