@@ -2,26 +2,43 @@
 
 import cv2
 import numpy as np
-import tensorflow as tf
+
+from tensorflow.lite.python.interpreter import Interpreter
 
 import rclpy
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, QoSReliabilityPolicy, QoSHistoryPolicy
 
 from sensor_msgs.msg import Image
-from cv_bridge import CvBridge
 from std_msgs.msg import Int32MultiArray
+from cv_bridge import CvBridge
 
 
-class SSDMobileNetLiveNode(Node):
+class TFLiteDetectorNode(Node):
     def __init__(self):
-        super().__init__("ssd_mobilenet_live_node")
+        super().__init__("tflite_detector_node")
 
         self.bridge = CvBridge()
 
-        # Change these to your actual exported model + labels.
-        self.model_path = "/home/ubuntu/ros2_ws/src/your_package/models/saved_model"
-        self.detect_fn = tf.saved_model.load(self.model_path)
+        self.model_path = "/home/hiwonder/ros_ws/src/ssd_mobilenet_live/models/model.tflite"
+        self.label_path = "/home/hiwonder/ros_ws/src/ssd_mobilenet_live/models/labelmap.txt"
+        self.min_conf = 0.5
+
+        with open(self.label_path, "r") as f:
+            self.labels = [line.strip() for line in f.readlines()]
+
+        self.interpreter = Interpreter(model_path=self.model_path)
+        self.interpreter.allocate_tensors()
+
+        self.input_details = self.interpreter.get_input_details()
+        self.output_details = self.interpreter.get_output_details()
+
+        self.model_height = self.input_details[0]["shape"][1]
+        self.model_width = self.input_details[0]["shape"][2]
+        self.float_input = self.input_details[0]["dtype"] == np.float32
+
+        self.input_mean = 127.5
+        self.input_std = 127.5
 
         sensor_qos = QoSProfile(
             reliability=QoSReliabilityPolicy.BEST_EFFORT,
@@ -42,83 +59,76 @@ class SSDMobileNetLiveNode(Node):
             10,
         )
 
-        #NOTE: Add subscriber to master node to get the class of block to find
+        #NOTE Add subcription to master node for class retrieval 
 
-        self.get_logger().info("Subscribed to /depth_cam/rgb/image_raw")
+        self.get_logger().info("TFLite detector node started.")
 
     def image_callback(self, msg):
-        rgb_image = self.bridge.imgmsg_to_cv2(msg, desired_encoding="rgb8")
+        # ROS Image -> OpenCV RGB image
+        image_rgb = self.bridge.imgmsg_to_cv2(msg, desired_encoding="rgb8")
 
-        input_tensor = tf.convert_to_tensor(
-            np.expand_dims(rgb_image, axis=0),
-            dtype=tf.uint8
-        )
+        imH, imW, _ = image_rgb.shape
 
-        detections = self.detect_fn(input_tensor)
+        # Resize to model input size
+        image_resized = cv2.resize(image_rgb, (self.model_width, self.model_height))
+        input_data = np.expand_dims(image_resized, axis=0)
 
-        num = int(detections.pop("num_detections"))
-        detections = {
-            key: value[0, :num].numpy()
-            for key, value in detections.items()
-        }
+        # Normalize only if the model expects float32
+        if self.float_input:
+            input_data = (np.float32(input_data) - self.input_mean) / self.input_std
 
-        boxes = detections["detection_boxes"]
-        scores = detections["detection_scores"]
-        classes = detections["detection_classes"].astype(np.int32)
+        # Run TFLite inference
+        self.interpreter.set_tensor(self.input_details[0]["index"], input_data)
+        self.interpreter.invoke()
 
-        box_corners = self.get_best_box_corners(rgb_image, boxes, scores, classes, threshold=0.5)
+        # These indices match your original program
+        scores = self.interpreter.get_tensor(self.output_details[0]["index"])[0]
+        boxes = self.interpreter.get_tensor(self.output_details[1]["index"])[0]
+        classes = self.interpreter.get_tensor(self.output_details[3]["index"])[0]
 
-        if box_corners is not None:
-            msg_out = Int32MultiArray()
-            msg_out.data = box_corners
-            self.box_pub.publish(msg_out)
-
-            self.get_logger().info(f"Published box corners: {box_corners}")
-
-    #NOTE:CHANGE LATER, ONLY ACCEPTS ONE OBJECT, ADD ARGUMENT FOR CLASS TO FIND BLOCKS OF SPECIFIC TYPE
-    
-    def get_best_box_corners(self, image, boxes, scores, classes, threshold=0.5):
-        h, w = image.shape[:2]
-
-        best_score = 0.0
         best_box = None
+        best_score = 0.0
+        best_class = None
 
-        for box, score, _cls in zip(boxes, scores, classes): #NOTE:_cls is currently throwaway, but will be used later to filter for specific block types
-            if score < threshold:
-                continue
+        for i in range(len(scores)):
+            score = scores[i]
 
-            if score > best_score:
-                best_score = score
-                best_box = box
+            if score > self.min_conf and score <= 1.0:
+                if score > best_score:
+                    best_score = score
+                    best_box = boxes[i]
+                    best_class = int(classes[i])
 
         if best_box is None:
-            return None
+            return
 
-        ymin, xmin, ymax, xmax = best_box
+        ymin = int(max(1, best_box[0] * imH))
+        xmin = int(max(1, best_box[1] * imW))
+        ymax = int(min(imH, best_box[2] * imH))
+        xmax = int(min(imW, best_box[3] * imW))
 
-        x1 = int(xmin * w)
-        y1 = int(ymin * h)
-        x2 = int(xmax * w)
-        y2 = int(ymax * h)
-
-        top_left = (x1, y1)
-        top_right = (x2, y1)
-        bottom_right = (x2, y2)
-        bottom_left = (x1, y2)
-
-        return [
-            top_left[0], top_left[1],
-            top_right[0], top_right[1],
-            bottom_right[0], bottom_right[1],
-            bottom_left[0], bottom_left[1],
+        box_corners = [
+            xmin, ymin,   # top-left
+            xmax, ymin,   # top-right
+            xmax, ymax,   # bottom-right
+            xmin, ymax,   # bottom-left
         ]
+
+        msg_out = Int32MultiArray()
+        msg_out.data = box_corners
+        self.box_pub.publish(msg_out)
+
+        label = self.labels[best_class] if best_class < len(self.labels) else str(best_class)
+
+        self.get_logger().info(
+            f"Published {label} {best_score:.2f}: {box_corners}"
+        )
+
 
 def main():
     rclpy.init()
-    node = SSDMobileNetLiveNode()
-
+    node = TFLiteDetectorNode()
     rclpy.spin(node)
-
     node.destroy_node()
     rclpy.shutdown()
 
