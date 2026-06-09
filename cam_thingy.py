@@ -13,13 +13,13 @@ from std_msgs.msg import Float32
 from cv_bridge import CvBridge
 
 
-class YOLOv8SegAngleNode(Node):
+class YOLOSegAngleNode(Node):
     def __init__(self):
-        super().__init__("yolov8_seg_angle_node")
+        super().__init__("yolo_seg_angle_node")
 
         self.bridge = CvBridge()
 
-        self.model_path = "/home/hiwonder/ros_ws/src/yolov8_seg_live/models/best.pt"
+        self.model_path = "/home/hiwonder/ros_ws/src/yolo_seg_live/models/e.pt"
         self.model = YOLO(self.model_path)
 
         self.min_conf = 0.5
@@ -39,11 +39,11 @@ class YOLOv8SegAngleNode(Node):
 
         self.angle_pub = self.create_publisher(
             Float32,
-            "/yolov8_seg/object_angle",
+            "/yolo_seg/object_angle",
             10,
         )
 
-        self.get_logger().info("YOLOv8-seg angle node started.")
+        self.get_logger().info("YOLO-seg angle node started.")
 
     def image_callback(self, msg):
         image_bgr = self.bridge.imgmsg_to_cv2(msg, desired_encoding="bgr8")
@@ -100,7 +100,7 @@ class YOLOv8SegAngleNode(Node):
 
 def main():
     rclpy.init()
-    node = TFLiteDetectorNode()
+    node = YOLOSegAngleNode()
     rclpy.spin(node)
     node.destroy_node()
     rclpy.shutdown()
