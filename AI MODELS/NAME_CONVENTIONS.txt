@@ -1,0 +1,5 @@
+[TrainedLegoSet]-[Final/Test]-[VersionID]
+
+Watermelon-Test
+V1 --> Trained from above, far away, ~200 images, poor masking at 640x480
+v2 -->
