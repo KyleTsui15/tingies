@@ -19,9 +19,9 @@ class YOLOSegAngleNode(Node):
 
         self.bridge = CvBridge()
 
-        self.model_path = "/home/hiwonder/ros_ws/src/yolo_seg_live/models/e.pt"
+        self.model_path = "/home/hiwonder/ros_ws/src/yolo_seg_live/models/e.onnx"
         self.model = YOLO(self.model_path)
-
+        
         self.min_conf = 0.5
 
         sensor_qos = QoSProfile(
