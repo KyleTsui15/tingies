@@ -37,6 +37,8 @@ class YOLOSegAngleNode(Node):
             sensor_qos,
         )
 
+        #Master node object type
+
         self.angle_pub = self.create_publisher(
             Float32,
             "/yolo_seg/object_angle",
