@@ -24,15 +24,26 @@ class RosRobotController(Node):
     def __init__(self, name):
         rclpy.init()
         super().__init__(name)
-        self.board = Board()
-        self.board.enable_reception()
-        self.running = True
 
-        # Declare parameters 声明参数
+        # Declare parameters before opening the serial port
+        self.declare_parameter('device', '/dev/rrc')
+        self.declare_parameter('baudrate', 1000000)
+        self.declare_parameter('serial_timeout', 5.0)
         self.declare_parameter('imu_frame', 'imu_link')
         self.declare_parameter('init_finish', False)
-        self.IMU_FRAME = self.get_parameter('imu_frame').value
 
+        device = str(self.get_parameter('device').value)
+        baudrate = int(self.get_parameter('baudrate').value)
+        serial_timeout = float(self.get_parameter('serial_timeout').value)
+
+        self.IMU_FRAME = str(self.get_parameter('imu_frame').value)
+
+        self.get_logger().info(f'Opening controller: device={device}, baudrate={baudrate}')
+
+        self.board = Board(device=device,baudrate=baudrate,timeout=serial_timeout,)
+
+        self.board.enable_reception()
+        self.running = True
         timer_cb_group = ReentrantCallbackGroup()
         self.imu_pub = self.create_publisher(Imu, '~/imu_raw', 1)
         self.joy_pub = self.create_publisher(Joy, '~/joy', 1)
