@@ -83,7 +83,7 @@ class ForwardKinematics:
         self.link1 = 0.12941763737
         self.link2 = 0.12941763737
         self.link3 = 0.05445583202
-        self.tool_link = 0.112
+        self.tool_link = 0.076
         # Joint limits in degrees, [min, max], matching transform.py.
         self.joint_range = [[-120.2, 120.2], [-180.2, 0.2], [-120.2, 120.2],
                             [-200.2, 20.2], [-120.2, 120.2]]

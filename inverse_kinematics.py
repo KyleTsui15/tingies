@@ -50,7 +50,7 @@ _l0 = 0.10314916202   # base_link
 _l1 = 0.12941763737   # link1
 _l2 = 0.12941763737   # link2
 _l3 = 0.05445583202   # link3
-_l4 = 0.112           # tool_link
+_l4 = 0.076           # tool_link
 
 # joint ranges stored in degrees [min, max]
 _joint_range = [[-120.2, 120.2], [-180.2, 0.2], [-120.2, 120.2],
