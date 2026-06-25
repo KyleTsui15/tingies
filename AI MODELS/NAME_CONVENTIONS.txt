@@ -2,4 +2,5 @@
 
 Watermelon-Test
 V1 --> Trained from above, far away, ~200 images, poor masking at 640x480
-v2 -->
+v2 --> Exported to onnx
+V3 --> Trained from below, 15cm, ~100 images, poor masking at 640x480, Intermediate model not all images labelled
