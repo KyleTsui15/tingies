@@ -32,13 +32,6 @@ class YOLOSegAngleNode(Node):
             depth=1,
         )
 
-        self.image_sub = self.create_subscription(
-            Image,
-            "/depth_cam/rgb/image_raw",
-            self.image_callback,
-            sensor_qos,
-        )
-
         # === BEGIN MASTER-INTEGRATION CHANGES (per-arm topics + class filter) ===
         # One node instance per arm. arm_num namespaces all topics so the master
         # and vision_move_bridge can address this arm specifically. Run a second
@@ -46,6 +39,9 @@ class YOLOSegAngleNode(Node):
         self.declare_parameter("arm_num", 1)
         self.arm_num = self.get_parameter("arm_num").value
         ns = f"/arm_{self.arm_num}"
+
+
+        self.image_sub = self.create_subscription(Image, f"{ns}/rgb/image_raw", self.image_callback, sensor_qos)
 
         # Only report objects matching the class the master currently wants.
         self.target_class = None

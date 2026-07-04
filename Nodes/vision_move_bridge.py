@@ -62,11 +62,11 @@ class IkDemo(Node):
         #self.angle_sub = self.create_subscription(Float32, f'{ns}/yolo_seg/object_angle', self.angle_callback, 10)
         #====LEGACY====#
 
-        self.servos_pub = self.create_publisher(ServosPosition, '/servo_controller', 1)
+        self.servos_pub = self.create_publisher(ServosPosition, f'{ns}/servo_controller', 1)
 
-        self.client = self.create_client(Trigger, '/controller_manager/init_finish')
+        self.client = self.create_client(Trigger, f'{ns}/controller_manager/init_finish')
         self.client.wait_for_service()
-        self.client = self.create_client(Trigger, '/kinematics/init_finish')
+        self.client = self.create_client(Trigger, f'{ns}/kinematics/init_finish')
         self.client.wait_for_service()
 
         self.publish_state(ST_IDLE)
